@@ -1,0 +1,35 @@
+# Context
+device_id: 7
+device_target: "Ascend"
+context_mode: "pynative"
+run_distribute: True
+
+# Train params
+lr: 0.01
+end_lr: 0.0001
+weight_decay: 0.0005
+opt_momentum: 0.9
+lr_power: 0.9
+num_epochs: 1
+num_iterations: 40000
+step_per_epoch: 1500
+pretrained: "/home/mindocr/w30005666/isanet/resnetv1d50.ckpt"
+
+# Loss
+aux_loss: False
+
+# Dataset parameters
+data_path: "/home/mindocr/w30005666/Cityscapes/"
+batch_size: 2 # 原实现 bs 16=2*8gpu
+num_classes: 19
+workers: 8
+base_size: 2048
+crop_size: [512, 1024]
+downsample_rate: 1
+scale_factor: 16
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+ignore_label: 255
+shuffle: True
+flip: True
+multi_scale: False

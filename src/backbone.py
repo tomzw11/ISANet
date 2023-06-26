@@ -205,14 +205,19 @@ class ResNet(nn.Cell):
     def construct(self, x) :
         return self._forward_impl(x)
 
-    def _resnet(block, layers, pretrained_path = None, **kwargs,):
+    def _resnet(block, layers, pretrained_path=None, **kwargs,):
         model = ResNet(block, layers, **kwargs)
         if pretrained_path is not None:
-            model = ms.load_param_into_net(model, ms.load_checkpoint(pretrained_path), strict_load=False)
+            unloaded = ms.load_param_into_net(model, ms.load_checkpoint(pretrained_path), strict_load=False)
+            if unloaded:
+                for p in unloaded:
+                    print("resnet weights unloaded ", p)
+            else:
+                print("all resnet weights loaded.")
         return model
     
     def resnet50(pretrained_path=None, **kwargs):
-        return ResNet._resnet(Bottleneck, [3, 4, 6, 3],pretrained_path,**kwargs)
+        return ResNet._resnet(Bottleneck, [3, 4, 6, 3], pretrained_path, **kwargs)
     
     def resnet101(pretrained_path=None, **kwargs):
-        return ResNet._resnet(Bottleneck, [3, 4, 23, 3],pretrained_path,**kwargs)
+        return ResNet._resnet(Bottleneck, [3, 4, 23, 3], pretrained_path, **kwargs)

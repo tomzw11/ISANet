@@ -33,7 +33,7 @@ class Cityscapes(BaseDataset):
                  num_classes=19,
                  multi_scale=False,
                  flip=False,
-                 ignore_label=-1,
+                 ignore_label=255,
                  base_size=2048,
                  crop_size=(512, 1024),
                  downsample_rate=1,

@@ -30,53 +30,28 @@ from mindspore.train.callback import LossMonitor, TimeMonitor, ModelCheckpoint, 
 
 from src.cityscapes import Cityscapes
 from src.isanet import ISANet
-from src.config import config_isanet as config
+from src.config import config
 
 set_seed(1)
 de.config.set_seed(1)
 
-def get_exp_lr(base_lr, xs, power=4e-10):
-    """Get learning rates for each step."""
-    ys = []
-    for x in xs:
-        ys.append(base_lr / np.exp(power * x ** 2))
-    return ys
+class WithLossCell(nn.Cell):
+    def __init__(self, net, criterion):
+        super(WithLossCell, self).__init__()
+        self.net = net
+        self.criterion = criterion
 
-
-def parse_args():
-    """Get arguments from command-line."""
-    parser = argparse.ArgumentParser(description="Mindspore ISANet Training Configurations.")
-    parser.add_argument("--device_target", type=str, default="Ascend", help="Target device [Ascend, GPU]")
-    parser.add_argument("--output_path", type=str, default=None, help="Storage path of training results on machine.")
-    parser.add_argument("--checkpoint_path", type=str, default=None,
-                        help="Storage path of checkpoint for pretraining or resuming on machine.")
-    parser.add_argument("--modelarts", type=ast.literal_eval, default=False,
-                        help="Run on ModelArts or offline machines.")
-    parser.add_argument("--run_distribute", type=ast.literal_eval, default=False,
-                        help="Use one card or multiple cards training.")
-    parser.add_argument("--lr", type=float, default=0.0012,
-                        help="Base learning rate.")
-    parser.add_argument("--lr_power", type=float, default=4e-10,
-                        help="Learning rate adjustment power.")
-    parser.add_argument("--begin_epoch", type=int, default=0,
-                        help="If it's a training resuming task, give it a beginning epoch.")
-    parser.add_argument("--end_epoch", type=int, default=1000,
-                        help="If you want to stop the task early, give it an ending epoch.")
-    parser.add_argument("--batchsize", type=int, default=2,
-                        help="batch size.")
-    parser.add_argument("--eval_callback", type=ast.literal_eval, default=False,
-                        help="To use inference while training or not.")
-    parser.add_argument("--eval_interval", type=int, default=50,
-                        help="Epoch interval of evaluating result during training.")
-    return parser.parse_args()
+    def construct(self, img, label):
+        pred = self.net(img)
+        loss = self.criterion(pred, label)
+        # print("label ", label.dtype)
+        # print("#########################################")
+        # print(pred)
+        # print(label)
+        return loss
 
 
 def main():
-
-    # context.set_context(mode=context.PYNATIVE_MODE, pynative_synchronize=True, device_target=config.device_target)
-    context.set_context(mode=context.PYNATIVE_MODE, pynative_synchronize=True, device_target="CPU")
-
-    # context.set_context(mode=context.GRAPH_MODE, device_target=config.device_target)
 
     if config.run_distribute:
         init()
@@ -87,91 +62,66 @@ def main():
                                           gradients_mean=True,
                                           device_num=device_num)
     else:
-        device_id = 0
+        device_id = 7
         device_num = 1
 
-    # crop_size = (config.train.image_size[0], config.train.image_size[1])
-    # data_tr = Cityscapes(config.data_path,
-    #                      num_samples=None,
-    #                      num_classes=config.dataset.num_classes,
-    #                      multi_scale=config.train.multi_scale,
-    #                      flip=config.train.flip,
-    #                      ignore_label=config.dataset.ignore_label,
-    #                      base_size=config.train.base_size,
-    #                      crop_size=crop_size,
-    #                      downsample_rate=config.train.downsample_rate,
-    #                      scale_factor=config.train.scale_factor,
-    #                      mean=config.dataset.mean,
-    #                      std=config.dataset.std,
-    #                      is_train=True)
+    context.set_context(mode=config.context_mode, device_target=config.device_target, device_id=config.device_id)
 
-    # if device_num == 1:
-    #     dataset = de.GeneratorDataset(data_tr, column_names=["image", "label"],
-    #                                   num_parallel_workers=config.workers,
-    #                                   shuffle=config.train.shuffle)
-    # else:
-    #     dataset = de.GeneratorDataset(data_tr, column_names=["image", "label"],
-    #                                   num_parallel_workers=config.workers,
-    #                                   shuffle=config.train.shuffle,
-    #                                   num_shards=device_num, shard_id=device_id)
-    # dataset = dataset.batch(config.batchsize, drop_remainder=True)
+    data_tr = Cityscapes(config.data_path,
+                         num_classes=config.num_classes,
+                         multi_scale=config.multi_scale,
+                         flip=config.flip,
+                         ignore_label=config.ignore_label,
+                         base_size=config.base_size,
+                         crop_size=(config.crop_size[0], config.crop_size[1]),
+                         downsample_rate=config.downsample_rate,
+                         scale_factor=config.scale_factor,
+                         mean=config.mean,
+                         std=config.std,
+                         is_train=True)
+
+    if device_num == 1:
+        dataset = de.GeneratorDataset(data_tr, column_names=["image", "label"],
+                                      num_parallel_workers=config.workers,
+                                      shuffle=config.shuffle)
+    else:
+        dataset = de.GeneratorDataset(data_tr, column_names=["image", "label"],
+                                      num_parallel_workers=config.workers,
+                                      shuffle=config.shuffle,
+                                      num_shards=device_num, shard_id=device_id)
+    dataset = dataset.batch(config.batch_size, drop_remainder=True)
 
     # Create network
-    net = ISANet(config.dataset.num_classes)
+    net = ISANet(config.num_classes, config.pretrained)
     net.set_train(True)
 
-    param_dict = ms.load_checkpoint("/home/mindocr/w30005666/isanet/resnetv1d50_1.ckpt")
+    # TODO: update config params.
+    lr_poly = nn.polynomial_decay_lr(
+        config.lr, 
+        config.end_lr, 
+        config.num_iterations, 
+        config.step_per_epoch, 
+        config.num_epochs, 
+        config.lr_power)
 
-    # for p in param_dict:
-    #     print(p, param_dict[p].shape)
+    data_loader = dataset.create_dict_iterator()
+    # image (bs, 3, 512, 1024) 
+    # label (bs, 512, 1024) 
 
-    unloaded = ms.load_param_into_net(net, param_dict)
-    # for p in unloaded:
-    #     print(p)
-    sys.exit()
+    optim = nn.SGD(params=net.trainable_params(), learning_rate=lr_poly, weight_decay=config.weight_decay)
 
-    # Learning rate adjustment.
-    steps_per_epoch = dataset.get_dataset_size()
-    total_steps = config.total_epoch * steps_per_epoch
-    begin_step = config.begin_epoch * steps_per_epoch
-    end_step = config.end_epoch * steps_per_epoch
-    xs = np.linspace(0, total_steps, total_steps)
-    lr = get_exp_lr(config.lr, xs, power=config.lr_power)
-    lr = lr[begin_step: end_step]
+    net_with_loss = WithLossCell(net, nn.CrossEntropyLoss(ignore_index=config.ignore_label))
+    train_net = nn.TrainOneStepCell(net_with_loss, optim)
 
-    # Optimizer
-    params = [{'params': net.trainable_params()}]
-    opt = SGD(params,
-              lr,
-              config.train.opt_momentum,
-              config.train.wd)
+    iteration = 0
+    for epoch in range(config.num_epochs):    
+        for i, data in enumerate(data_loader): 
 
-    loss = nn.CrossEntropyLoss(ignore_index=255)
-
-    # Create model
-    model = Model(net, loss_fn=loss, optimizer=opt, amp_level="O0") #TODO: add loss scale manager.
-
-    # Callbacks
-    time_cb = TimeMonitor(data_size=steps_per_epoch)
-    loss_cb = LossMonitor(per_print_times=steps_per_epoch)
-
-    # Save-checkpoint callback
-    ckpt_config = CheckpointConfig(save_checkpoint_steps=steps_per_epoch * config.save_checkpoint_epochs,
-                                   keep_checkpoint_max=config.keep_checkpoint_max)
-    ckpt_cb = ModelCheckpoint(prefix='{}'.format("seg_ISANet-SGD"), config=ckpt_config)
-    cb = [time_cb, loss_cb, ckpt_cb]
-
-    train_epoch = config.end_epoch - config.begin_epoch
-    model.train(train_epoch, dataset, callbacks=cb, dataset_sink_mode=True)
-
-    # data_loader = dataset.create_dict_iterator()
-    # for i, data in enumerate(data_loader):
-    #     for k in data.keys():
-    #         print(k, data[k].shape, type(data[k]))
-    #         print(data[k][0])
-    #     sys.exit()
-
+            img = data['image']
+            label = data['label']
+            loss = train_net(img, label)
+            iteration += 1
+            print("iteration ", iteration, "loss ", loss)
 
 if __name__ == '__main__':
-    args = parse_args()
     main()

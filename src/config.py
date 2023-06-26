@@ -1,4 +1,4 @@
-# Copyright 2021 Huawei Technologies Co., Ltd
+# Copyright 2023 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,132 +12,122 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
+"""Parse arguments"""
 
-"""Configuration."""
-import json
-from easydict import EasyDict as ed
-
-
-config_isanet = ed({
-    "data_url": None,
-    "data_path": "/home/mindocr/w30005666/Cityscapes/",
-    "train_url": None,
-    "output_path": None,
-    "checkpoint_url": None,
-    "checkpoint_path": None,
-    "eval_data_url": None,
-    "eval_data_path": None,
-    "run_distribute": False,
-    "device_target": "Ascend",
-    "workers": 8,
-    "modelarts": False,
-    "lr": 0.0013,
-    "lr_power": 4e-10,
-    "save_checkpoint_epochs": 20,
-    "keep_checkpoint_max": 20,
-    "total_epoch": 100,
-    "begin_epoch": 0,
-    "end_epoch": 100,
-    "batchsize": 4,
-    "eval_callback": False,
-    "eval_interval": 50,
-    "train": ed({
-        "train_list": "/train.lst",
-        "image_size": [512, 1024],
-        "base_size": 2,
-        "multi_scale": True,
-        "flip": True,
-        "downsample_rate": 1,
-        "scale_factor": 16,
-        "shuffle": True,
-        "param_initializer": "TruncatedNormal",
-        "opt_momentum": 0.9,
-        "wd": 0.0005,
-        "num_samples": 0
-    }),
-    "dataset": ed({
-        "name": "Cityscapes",
-        "num_classes": 19,
-        "ignore_label": 255,
-        "mean": [0.485, 0.456, 0.406],
-        "std": [0.229, 0.224, 0.225],
-
-    }),
-    "eval": ed({
-        "eval_list": "/val.lst",
-        "image_size": [1024, 2048],
-        "base_size": 2048,
-        "batch_size": 1,
-        "num_samples": 0,
-        "flip": False,
-        "multi_scale": False,
-        "scale_list": [1]
-    }),
-    "model": ed({
-        "name": "seg_hrnet_w48",
-        "num_outputs": 2,
-        "align_corners": True,
-        "extra": {
-            "FINAL_CONV_KERNEL": 1,
-            "STAGE1": {
-                "NUM_MODULES": 1,
-                "NUM_BRANCHES": 1,
-                "BLOCK": "BOTTLENECK",
-                "NUM_BLOCKS": [4],
-                "NUM_CHANNELS": [64],
-                "FUSE_METHOD": "SUM"
-            },
-            "STAGE2": {
-                "NUM_MODULES": 1,
-                "NUM_BRANCHES": 2,
-                "BLOCK": "BASIC",
-                "NUM_BLOCKS": [4, 4],
-                "NUM_CHANNELS": [48, 96],
-                "FUSE_METHOD": "SUM"
-            },
-            "STAGE3": {
-                "NUM_MODULES": 4,
-                "NUM_BRANCHES": 3,
-                "BLOCK": "BASIC",
-                "NUM_BLOCKS": [4, 4, 4],
-                "NUM_CHANNELS": [48, 96, 192],
-                "FUSE_METHOD": "SUM"
-            },
-            "STAGE4": {
-                "NUM_MODULES": 3,
-                "NUM_BRANCHES": 4,
-                "BLOCK": "BASIC",
-                "NUM_BLOCKS": [4, 4, 4, 4],
-                "NUM_CHANNELS": [48, 96, 192, 384],
-                "FUSE_METHOD": "SUM"
-            },
-        },
-        "ocr": {
-            "mid_channels": 512,
-            "key_channels": 256,
-            "dropout": 0.05,
-            "scale": 1
-        }
-    }),
-    "loss": ed({
-        "loss_scale": 10,
-        "use_weights": True,
-        "balance_weights": [0.4, 1]
-    }),
-})
+import os
+import ast
+import argparse
+from pprint import pformat
+import yaml
 
 
-def show_config(cfg):
-    """Show configuration."""
-    split_line_up = "==================================================\n"
-    split_line_bt = "\n=================================================="
-    print(split_line_up,
-          json.dumps(cfg, ensure_ascii=False, indent=2),
-          split_line_bt)
+class Config:
+    """
+    Configuration namespace. Convert dictionary to members.
+    """
+
+    def __init__(self, cfg_dict):
+        for k, v in cfg_dict.items():
+            if isinstance(v, (list, tuple)):
+                setattr(self, k, [Config(x) if isinstance(x, dict) else x for x in v])
+            else:
+                setattr(self, k, Config(v) if isinstance(v, dict) else v)
+
+    def __str__(self):
+        return pformat(self.__dict__)
+
+    def __repr__(self):
+        return self.__str__()
 
 
-def organize_configuration(cfg, args):
-    """Add parameters from command-line into configuration."""
-    args_dict = vars(args)
-    for item in args_dict.items():
-        cfg[item[0]] = item[1]
+def parse_cli_to_yaml(parser, cfg, helper=None, choices=None, cfg_path="default_config.yaml"):
+    """
+    Parse command line arguments to the configuration according to the default yaml.
+
+    Args:
+        parser: Parent parser.
+        cfg: Base configuration.
+        helper: Helper description.
+        cfg_path: Path to the default yaml config.
+    """
+    parser = argparse.ArgumentParser(description="[REPLACE THIS at config.py]",
+                                     parents=[parser])
+    helper = {} if helper is None else helper
+    choices = {} if choices is None else choices
+    for item in cfg:
+        if not isinstance(cfg[item], list) and not isinstance(cfg[item], dict):
+            help_description = helper[item] if item in helper else "Please reference to {}".format(cfg_path)
+            choice = choices[item] if item in choices else None
+            if isinstance(cfg[item], bool):
+                parser.add_argument("--" + item, type=ast.literal_eval, default=cfg[item], choices=choice,
+                                    help=help_description)
+            else:
+                parser.add_argument("--" + item, type=type(cfg[item]), default=cfg[item], choices=choice,
+                                    help=help_description)
+    args = parser.parse_args()
+    return args
+
+
+def parse_yaml(yaml_path):
+    """
+    Parse the yaml config file.
+
+    Args:
+        yaml_path: Path to the yaml config.
+    """
+    with open(yaml_path, 'r', encoding='utf-8') as fin:
+        try:
+            cfgs = yaml.load_all(fin.read(), Loader=yaml.FullLoader)
+            cfgs = [x for x in cfgs]
+            if len(cfgs) == 1:
+                cfg_helper = {}
+                cfg = cfgs[0]
+                cfg_choices = {}
+            elif len(cfgs) == 2:
+                cfg, cfg_helper = cfgs
+                cfg_choices = {}
+            elif len(cfgs) == 3:
+                cfg, cfg_helper, cfg_choices = cfgs
+            else:
+                raise ValueError("At most 3 docs (config, description for help, choices) are supported in config yaml")
+        except:
+            raise ValueError("Failed to parse yaml")
+    return cfg, cfg_helper, cfg_choices
+
+
+def merge(args, cfg):
+    """
+    Merge the base config from yaml file and command line arguments.
+
+    Args:
+        args: Command line arguments.
+        cfg: Base configuration.
+    """
+    args_var = vars(args)
+    for item in args_var:
+        cfg[item] = args_var[item]
+    return cfg
+
+
+def get_config():
+    """
+    Get Config according to the yaml file and cli arguments.
+    """
+    parser = argparse.ArgumentParser(description="default name", add_help=False)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parser.add_argument("--config_path", type=str, default=os.path.join(current_dir, "../default_config.yaml"),
+                        help="Config file path")
+    path_args, _ = parser.parse_known_args()
+    default, helper, choices = parse_yaml(path_args.config_path)
+    args = parse_cli_to_yaml(parser=parser, cfg=default, helper=helper, choices=choices, cfg_path=path_args.config_path)
+    final_config = merge(args, default)
+
+    print("################################ training config ####################################")
+    for c in final_config:
+        print(c, final_config[c])
+    print("################################ training config ####################################")
+
+    return Config(final_config)
+
+
+config = get_config()

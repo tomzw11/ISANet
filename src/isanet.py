@@ -10,10 +10,10 @@ from src.backbone import ResNet
 
 
 class ISANet(nn.Cell): 
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, backbone_path):
         super(ISANet, self).__init__()
 
-        self.backbone = ResNet.resnet50(replace_stride_with_dilation=[1,2,4])
+        self.backbone = ResNet.resnet50(replace_stride_with_dilation=[1,2,4], pretrained_path=backbone_path)
         self.ISAHead = nn.SequentialCell(
             nn.Conv2d(2048, 512, 3, padding=1, stride=1, pad_mode="pad"),
             nn.BatchNorm2d(512),
@@ -31,7 +31,7 @@ class ISANet(nn.Cell):
         x = self.cls_head(x) # (1, 19, 64, 128)
         x = ops.interpolate(x, mode="bilinear", scales=(1.,1.,8.,8.)) # (1, 19, 512, 1024) 
 
-        return x 
+        return x
 
 if __name__ == '__main__':
     
